@@ -6,7 +6,7 @@
 #include <Chirale_TensorFlowLite.h>
 
 // include static array definition of pre-trained model
-#include "fall_detector_cnn_Fl32_50.h"
+#include "fall_detector_cnn_quant_v3.h"
 
 // This TensorFlow Lite Micro Library for Arduino is not similar to standard
 // Arduino libraries. These additional header files must be included.
@@ -114,7 +114,7 @@ void setup() {
   display.println("Model loaded");
   display.display();
   delay(1000);
-
+  Serial.println(input->type); 
 }
 
 void runinference(){
@@ -124,39 +124,59 @@ void runinference(){
     return;
   }
 
+  Serial.println("Inference result:");
+  for (int i = 0; i < output->dims->data[1]; i++) {
+    Serial.print("Class ");
+    Serial.print(i);
+    Serial.print(": ");
+    Serial.println(output->data.f[i], 6);
+  }
+
 }
 void loop() {
-  
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
-  input_buffer[buffer_index][0] = a.acceleration.x;
-  input_buffer[buffer_index][1] = a.acceleration.y;
-  input_buffer[buffer_index][2] = a.acceleration.z;
-  input_buffer[buffer_index][3] = g.gyro.x;
-  input_buffer[buffer_index][4] = g.gyro.y;
-  input_buffer[buffer_index][5] = g.gyro.z;
-  buffer_index++;
-    
+  static unsigned long lastSampleTime =0;
+  unsigned long now = millis();
+  if (now - lastSampleTime >= 20 && buffer_index < 50){
+    lastSampleTime = now;
+
+    sensors_event_t a, g, temp;
+    mpu.getEvent(&a, &g, &temp);
+
+    // Store into buffer
+    input_buffer[buffer_index][0] = a.acceleration.x;
+    input_buffer[buffer_index][1] = a.acceleration.y;
+    input_buffer[buffer_index][2] = a.acceleration.z;
+    input_buffer[buffer_index][3] = g.gyro.x;
+    input_buffer[buffer_index][4] = g.gyro.y;
+    input_buffer[buffer_index][5] = g.gyro.z;
+    buffer_index++;
+  }
   if(buffer_index >= 50){
-    float* input_data = interpreter->typed_input_tensor<float>(0);
+    buffer_index = 0;
     for (int i = 0; i < 50; i++) {
       for (int j = 0; j < 6; j++) {
-        input_data[i * 6 + j] = input_buffer[i][j];
+        input->data.f[i * 6 + j] = (float)(i + j);  // test pattern
       }
     }
+    interpreter->Invoke();
+    float output_scale = output->params.scale;
+    int output_zero_point = output->params.zero_point;
+    // Show the output
+    display.clearDisplay();
+    for (int i = 0; i < 4; i++) {
+      int8_t quantized_val = output->data.int8[i];
+      float dequantized = (quantized_val - output_zero_point) * output_scale;
+      display.setCursor(0, i * 10);
+      display.print("Class ");
+      display.print(i);
+      display.print(": ");
+      display.println(dequantized, 6);
+    }
+    display.display();
 
-    //runinference();
-    buffer_index = 0;
+    delay(2000);  // update every 2 sec
   }
-  
-  
- 
-  
-  for (int i = 0; i < 4; i++) {
-  display.print("Class "); display.print(i); display.print(": ");
-  display.println(output->data.f[i], 6);
-}
-  delay(500);
+  display.println("collecting data");
 
   
 }
